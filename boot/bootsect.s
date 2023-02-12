@@ -31,53 +31,142 @@ begdata:
 begbss:
 .text
 
-SETUPLEN = 4				! nr of setup-sectors
-BOOTSEG  = 0x07c0			! original address of boot-sector
-INITSEG  = 0x9000			! we move boot here - out of the way
-SETUPSEG = 0x9020			! setup starts here
-SYSSEG   = 0x1000			! system loaded at 0x10000 (65536).
+SETUPLEN = 4				    ! nr of setup-sectors
+BOOTSEG  = 0x07c0			    ! original address of boot-sector
+INITSEG  = 0x9000			    ! we move boot here - out of the way
+SETUPSEG = 0x9020			    ! setup starts here
+SYSSEG   = 0x1000			    ! system loaded at 0x10000 (65536).
 ENDSEG   = SYSSEG + SYSSIZE		! where to stop loading
 
 ! ROOT_DEV:	0x000 - same type of floppy as boot.
 !		0x301 - first partition on first drive etc
 ROOT_DEV = 0x306
 
+; 梦开始的地方
+
 entry start
 start:
-	mov	ax,#BOOTSEG
-	mov	ds,ax
+	mov	ax,#BOOTSEG         ; 把ds设置成0x07c0
+	mov	ds,ax               ; 方便访问内存的时候利用这个段基址寻址
 	mov	ax,#INITSEG
-	mov	es,ax
-	mov	cx,#256
+	mov	es,ax               ; 把es设置成0x9000
+	mov	cx,#256             ; 把cx设置成256
 	sub	si,si
-	sub	di,di
-	rep
-	movw
-	jmpi	go,INITSEG
-go:	mov	ax,cs
+	sub	di,di               ; si和di清零
+	rep                     ; 重复执行movw执行，即每次复制一个字（两个字节）
+	movw                    ; 即将ds:cs开始的256个字的数据复制到es:di处（0x07c00 -> 0x90000）
+	jmpi	go,INITSEG      ; 段间跳转，跳转到0x9000:go处继续执行
+
+; bootsect编译后放置在硬盘的第一扇区
+; BIOS加载这个所谓的启动区共512字节的内容到0x07c00后
+; 又原样复制了一份到0x90000处
+; 执行完上面的代码后，内存情况如下所示
+;            ___________
+;            |         |
+;            |         |
+;            |         |
+;            |         |
+;            |         |
+;      ----->|---------|
+;  bootsect  | 512byte | 
+;      ----->|---------|<-0x90000
+;            |         |         /\\
+;            |         |           \ 复制
+;            |         |          / 
+;      ----->|---------|         / 
+;  bootsect  | 512byte |        /
+;      ----->|---------|<-0x07c00
+;            |         |
+;            |_________|
+;              memory
+
+
+; 上一段代码跳到了go,0x9000处
+; go,0x9000表示地址0x9000:go
+; 从之前的分析可以看出0x90000处存放的是编译好的bootsect
+; 其实可以这么认为，0x90000是修正了基地址
+; 而go标签则是代码在内存中的偏移量
+; 最终的结果CPU跳到了这儿继续执行
+; 至于为啥非得加这么一条jump，那就不得不说jump的副作用了
+; 或者说jump为什么能“jump”
+; jump实际上做的是设置cs:ip，上面的jumpi执行后cs=0x9000，ip=go标签的地址
+
+; 好了好了，继续往下看
+go:	mov	ax,cs                   ; cs在之前jump后被设置为0x9000
 	mov	ds,ax
 	mov	es,ax
 ! put stack at 0x9ff00.
-	mov	ss,ax
-	mov	sp,#0xFF00		! arbitrary value >>512
+	mov	ss,ax                   ; 将三个段寄存器ds/es/ss都设置为0x9000，即设置了如何访问数据、代码和栈
+	mov	sp,#0xFF00		        ; arbitrary value >>512，设置栈顶指针为0xff00
+                                ; 那么拼接上ss，最终栈顶地址为0x9ff00
+
+; 在之前的内存分布图上添加栈顶指针
+;            ___________
+;            |         |
+;            |    栈   |<-0x9ff00 (stack top pointer)
+;            |    ||   |
+;            |    ||   |
+;            |    \/   |
+;            |         |
+;      ----->|---------|
+;  bootsect  | 512byte | 
+;      ----->|---------|<-0x90000
+;            |         |         /\\
+;            |         |           \ 复制
+;            |         |          / 
+;      ----->|---------|         / 
+;  bootsect  | 512byte |        /
+;      ----->|---------|<-0x07c00
+;            |         |
+;            |_________|
+;              memory
 
 ! load the setup-sectors directly after the bootblock.
-! Note that 'es' is already set up.
-
+! Note that 'es' is already set up. es = 0x9000
 load_setup:
-	mov	dx,#0x0000		! drive 0, head 0
-	mov	cx,#0x0002		! sector 2, track 0
-	mov	bx,#0x0200		! address = 512, in INITSEG
+	mov	dx,#0x0000		    ! drive 0, head 0
+	mov	cx,#0x0002		    ! sector 2, track 0
+	mov	bx,#0x0200		    ! address = 512, in INITSEG
 	mov	ax,#0x0200+SETUPLEN	! service 2, nr of sectors
-	int	0x13			! read it
+	int	0x13			    ! read it
 	jnc	ok_load_setup		! ok - continue
 	mov	dx,#0x0000
-	mov	ax,#0x0000		! reset the diskette
-	int	0x13
-	j	load_setup
+	mov	ax,#0x0000		    ! reset the diskette
+	int	0x13                ; 没看明白这里为啥要再发起一次0x13中断
+	j	load_setup          ; 如果setup分区加载失败，则重试直到成功
+
+; 代码看起来长，其实好理解
+; 就是发起了0x13号中断来读取磁盘第2扇区开始，共计4个扇区的数据到到内存0x90200处
+;            ___________
+;            |         |
+;            |    栈   |<-0x9ff00 (stack top pointer)
+;            |    ||   |
+;            |    ||   |
+;            |    \/   |
+;            |         |
+;      ----->|---------| 
+;            | 512byte | 
+;            |---------|
+;            | 512byte |
+;    setup   |---------|
+;            | 512byte |
+;            |---------| 
+;            | 512byte | 
+;      ----->|---------|<-0x90200
+;  bootsect  | 512byte | 
+;      ----->|---------|<-0x90000
+;            |         |         /\\
+;            |         |           \ 复制
+;            |         |          / 
+;      ----->|---------|         / 
+;  bootsect  | 512byte |        /
+;      ----->|---------|<-0x07c00
+;            |         |
+;            |_________|
+;              memory
+
 
 ok_load_setup:
-
 ! Get disk drive parameters, specifically nr of sectors/track
 
 	mov	dl,#0x00
@@ -99,14 +188,51 @@ ok_load_setup:
 	mov	bx,#0x0007		! page 0, attribute 7 (normal)
 	mov	bp,#msg1
 	mov	ax,#0x1301		! write string, move cursor
-	int	0x10
+	int	0x10            ; 打印提示信息
 
 ! ok, we've written the message, now
 ! we want to load the system (at 0x10000)
 
-	mov	ax,#SYSSEG
-	mov	es,ax		! segment of 0x010000
-	call	read_it
+	mov	ax,#SYSSEG      ; SYSSEG = 0x1000
+	mov	es,ax	     	! segment of 0x010000
+	call	read_it     ; 将硬盘第6分区开始的共计240个分区加载次内存0x10000处
+;            ___________
+;            |         |
+;            |    栈   |<-0x9ff00 (stack top pointer)
+;            |    ||   |
+;            |    ||   |
+;            |    \/   |
+;            |         |
+;      ----->|---------| 
+;            | 512byte | 
+;            |---------|
+;            | 512byte |
+;    setup   |---------|
+;            | 512byte |
+;            |---------| 
+;            | 512byte | 
+;      ----->|---------|<-0x90200              -------  ---
+;  bootsect  | 512byte |                       |          |
+;      ----->|---------|<-0x90000              |          |
+;            |         |         /\\           |          |
+;            |         |           \ 复制      |----------|<---------
+;      ----->|---------|            |          |          |
+;            | 512byte |            |          |          |
+;            |---------|            |          |          |
+;            |    | |  |            |          |  system  |  240个扇区      <--- others
+;    system  |    | |  |            |          |          |
+;(240个扇区) |    | |  |            |          |          |
+;            |---------|            |          |          |
+;            | 512byte |           /           |----------|<---------
+;      ----->|---------|<-0x10000 /            |          | 
+;            |---------|         /             |   setup  |  4个扇区        <--- setup.s
+;  bootsect  | 512byte |       /               |          |        
+;      ----->|---------|<-0x07c00              |----------|<---------
+;            |         |                       | bootsect |  1个扇区        <--- bootsect.s
+;            |_________|                       |__________|<--------- 
+;              memory                             disk
+; 至此，整个操作系统的全部代码都加载进了内存中
+
 	call	kill_motor
 
 ! After that we check which root-device to use. If the device is
@@ -135,8 +261,10 @@ root_defined:
 ! after that (everyting loaded), we jump to
 ! the setup-routine loaded directly after
 ! the bootblock:
-
-	jmpi	0,SETUPSEG
+	jmpi	0,SETUPSEG      ; SETUPSEG = 0x9020
+; 当一切加载就绪，跳转到0x9020:0，即0x90200地址处
+; 从上一幅内存分布图可知，这个地址是setup起始处
+; 至此，bootsect.s告一段落，接下来进入setup.s
 
 ! This routine loads the system at address 0x10000, making sure
 ! no 64kB boundaries are crossed. We try to load it as fast as
@@ -145,14 +273,15 @@ root_defined:
 ! in:	es - starting address segment (normally 0x1000)
 !
 sread:	.word 1+SETUPLEN	! sectors read of current track
-head:	.word 0			! current head
-track:	.word 0			! current track
+head:	.word 0	    		! current head
+track:	.word 0	    		! current track
 
 read_it:
 	mov ax,es
 	test ax,#0x0fff
-die:	jne die			! es must be at 64kB boundary
-	xor bx,bx		! bx is starting address within segment
+die:
+    jne die			    ! es must be at 64kB boundary
+	xor bx,bx		    ! bx is starting address within segment
 rp_read:
 	mov ax,es
 	cmp ax,#ENDSEG		! have we loaded all yet?
