@@ -55,6 +55,8 @@ extern long startup_time;
 /*
  * This is set up by the setup-routine at boot-time
  */
+// 之前通过setup.s调用BIOS中断获取到的设备参数信息保存在了约定好的内存地址处
+// 因而此处直接指定内存地址取用即可
 #define EXT_MEM_K (*(unsigned short *)0x90002)
 #define DRIVE_INFO (*(struct drive_info *)0x90080)
 #define ORIG_ROOT_DEV (*(unsigned short *)0x901FC)
@@ -102,27 +104,37 @@ static long main_memory_start = 0;
 struct drive_info { char dummy[32]; } drive_info;
 
 void main(void)		/* This really IS void, no error here. */
-{			/* The startup routine assumes (well, ...) this */
+{			        /* The startup routine assumes (well, ...) this */
 /*
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
  */
+
+    // 1.设备参数信息获取与内存空间计算
  	ROOT_DEV = ORIG_ROOT_DEV;
  	drive_info = DRIVE_INFO;
+    // 内存空间大小设置
 	memory_end = (1<<20) + (EXT_MEM_K<<10);
 	memory_end &= 0xfffff000;
-	if (memory_end > 16*1024*1024)
-		memory_end = 16*1024*1024;
-	if (memory_end > 12*1024*1024) 
+	if (memory_end > 16*1024*1024)        // head.s里说的默认最大支持16MB内存
+		memory_end = 16*1024*1024;        // 因而直接将内存地址尾设置为16MB
+    // buffer大小设置，可以看到内存越大分配给buffer的也会越大
+	if (memory_end > 12*1024*1024)
 		buffer_memory_end = 4*1024*1024;
 	else if (memory_end > 6*1024*1024)
 		buffer_memory_end = 2*1024*1024;
 	else
 		buffer_memory_end = 1*1024*1024;
-	main_memory_start = buffer_memory_end;
+	main_memory_start = buffer_memory_end; // main的地址空间从buffer尾开始，合理
 #ifdef RAMDISK
 	main_memory_start += rd_init(main_memory_start, RAMDISK*1024);
 #endif
+    // 以总内存8MB为例，则经此番设置之后
+    // memory_end = 8MB
+    // buffer_memory_ed = 2MB
+    // main_memory_start = 2MB
+
+    // 2.各种初始化操作
 	mem_init(main_memory_start,memory_end);
 	trap_init();
 	blk_dev_init();
@@ -133,7 +145,9 @@ void main(void)		/* This really IS void, no error here. */
 	buffer_init(buffer_memory_end);
 	hd_init();
 	floppy_init();
-	sti();
+
+    // 3.切换到用户态模式
+	sti();              // 开中断
 	move_to_user_mode();
 	if (!fork()) {		/* we count on this going ok */
 		init();
@@ -145,6 +159,9 @@ void main(void)		/* This really IS void, no error here. */
  * can run). For task0 'pause()' just means we go check if some other
  * task can run, and if not we return here.
  */
+
+    // 4.死循环以防止程序退出
+    // pause: suspend the thread until a signal is received.
 	for(;;) pause();
 }
 

@@ -235,7 +235,7 @@ void un_wp_page(unsigned long * table_entry)
 	*table_entry = new_page | 7;
 	invalidate();
 	copy_page(old_page,new_page);
-}	
+}
 
 /*
  * This routine handles present pages, when users try to write
@@ -396,18 +396,31 @@ void do_no_page(unsigned long error_code,unsigned long address)
 	oom();
 }
 
+// 主内存初始化
+// 其实就是用一个蛮大的char型数组来管理内核区之外的内存空间
+// 不妨设总内存大小为8MB
+// 则start_mem = 2MB，end_mem   = 8MB
 void mem_init(long start_mem, long end_mem)
 {
 	int i;
 
 	HIGH_MEMORY = end_mem;
+    // PAGING_PAGES是一个很大的char型数组，用来记录每一个内存页的使用情况
+    // 内存地址开始的1MB是内核空间，无需管理
+    // 因而需要管理的内存页数目 PAGING_PAGES = 15MB/4KB
+    // 初始时将这些全部标记为已使用
 	for (i=0 ; i<PAGING_PAGES ; i++)
 		mem_map[i] = USED;
+    // 1MB ~ 2MB的内存空间设置给了buffer
 	i = MAP_NR(start_mem);
+    // 2MB ~ 8MB是可供分配的，因而需要将这6MB内存空间相应的使用位清零
 	end_mem -= start_mem;
 	end_mem >>= 12;
 	while (end_mem-->0)
 		mem_map[i++]=0;
+
+    // TODO
+    // 然而为啥主内存区域先统一设为使用后再清零呢？
 }
 
 void calc_mem(void)
