@@ -11,7 +11,7 @@ SYSSIZE = 0x3000
 ! iself out of the way to address 0x90000, and jumps there.
 !
 ! It then loads 'setup' directly after itself (0x90200), and the system
-! at 0x10000, using BIOS interrupts. 
+! at 0x10000, using BIOS interrupts.
 !
 ! NOTE! currently system is at most 8*65536 bytes long. This should be no
 ! problem, even in the future. I want to keep it simple. This 512 kB
@@ -54,7 +54,7 @@ start:
 	sub	si,si
 	sub	di,di               ; si和di清零
 	rep                     ; 重复执行movw执行，即每次复制一个字（两个字节）
-	movw                    ; 即将ds:cs开始的256个字的数据复制到es:di处（0x07c00 -> 0x90000）
+	movw                    ; 即将ds:si开始的256个字的数据复制到es:di处（0x07c00 -> 0x90000）
 	jmpi	go,INITSEG      ; 段间跳转，跳转到0x9000:go处继续执行
 
 ; bootsect编译后放置在硬盘的第一扇区
@@ -68,12 +68,12 @@ start:
 ;            |         |
 ;            |         |
 ;      ----->|---------|
-;  bootsect  | 512byte | 
+;  bootsect  | 512byte |
 ;      ----->|---------|<-0x90000
 ;            |         |         /\\
 ;            |         |           \ 复制
-;            |         |          / 
-;      ----->|---------|         / 
+;            |         |          /
+;      ----->|---------|         /
 ;  bootsect  | 512byte |        /
 ;      ----->|---------|<-0x07c00
 ;            |         |
@@ -109,12 +109,12 @@ go:	mov	ax,cs                   ; cs在之前jump后被设置为0x9000
 ;            |    \/   |
 ;            |         |
 ;      ----->|---------|
-;  bootsect  | 512byte | 
+;  bootsect  | 512byte |
 ;      ----->|---------|<-0x90000
 ;            |         |         /\\
 ;            |         |           \ 复制
-;            |         |          / 
-;      ----->|---------|         / 
+;            |         |          /
+;      ----->|---------|         /
 ;  bootsect  | 512byte |        /
 ;      ----->|---------|<-0x07c00
 ;            |         |
@@ -144,21 +144,21 @@ load_setup:
 ;            |    ||   |
 ;            |    \/   |
 ;            |         |
-;      ----->|---------| 
-;            | 512byte | 
+;      ----->|---------|
+;            | 512byte |
 ;            |---------|
 ;            | 512byte |
 ;    setup   |---------|
 ;            | 512byte |
-;            |---------| 
-;            | 512byte | 
+;            |---------|
+;            | 512byte |
 ;      ----->|---------|<-0x90200
-;  bootsect  | 512byte | 
+;  bootsect  | 512byte |
 ;      ----->|---------|<-0x90000
 ;            |         |         /\\
 ;            |         |           \ 复制
-;            |         |          / 
-;      ----->|---------|         / 
+;            |         |          /
+;      ----->|---------|         /
 ;  bootsect  | 512byte |        /
 ;      ----->|---------|<-0x07c00
 ;            |         |
@@ -183,7 +183,7 @@ ok_load_setup:
 	mov	ah,#0x03		! read cursor pos
 	xor	bh,bh
 	int	0x10
-	
+
 	mov	cx,#24
 	mov	bx,#0x0007		! page 0, attribute 7 (normal)
 	mov	bp,#msg1
@@ -203,14 +203,14 @@ ok_load_setup:
 ;            |    ||   |
 ;            |    \/   |
 ;            |         |
-;      ----->|---------| 
-;            | 512byte | 
+;      ----->|---------|
+;            | 512byte |
 ;            |---------|
 ;            | 512byte |
 ;    setup   |---------|
 ;            | 512byte |
-;            |---------| 
-;            | 512byte | 
+;            |---------|
+;            | 512byte |
 ;      ----->|---------|<-0x90200              -------  ---
 ;  bootsect  | 512byte |                       |          |
 ;      ----->|---------|<-0x90000              |          |
@@ -224,12 +224,12 @@ ok_load_setup:
 ;(240个扇区) |    | |  |            |          |          |
 ;            |---------|            |          |          |
 ;            | 512byte |           /           |----------|<---------
-;      ----->|---------|<-0x10000 /            |          | 
+;      ----->|---------|<-0x10000 /            |          |
 ;            |---------|         /             |   setup  |  4个扇区        <--- setup.s
-;  bootsect  | 512byte |       /               |          |        
+;  bootsect  | 512byte |       /               |          |
 ;      ----->|---------|<-0x07c00              |----------|<---------
 ;            |         |                       | bootsect |  1个扇区        <--- bootsect.s
-;            |_________|                       |__________|<--------- 
+;            |_________|                       |__________|<---------
 ;              memory                             disk
 ; 至此，整个操作系统的全部代码都加载进了内存中
 
