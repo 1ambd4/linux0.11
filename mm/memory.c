@@ -28,9 +28,9 @@
 #include <linux/head.h>
 #include <linux/kernel.h>
 
-volatile void do_exit(long code);
+void do_exit(long code);
 
-static inline volatile void oom(void)
+static inline void oom(void)
 {
 	printk("out of memory\n\r");
 	do_exit(SIGSEGV);
@@ -52,7 +52,7 @@ current->start_code + current->end_code)
 static long HIGH_MEMORY = 0;
 
 #define copy_page(from,to) \
-__asm__("cld ; rep ; movsl"::"S" (from),"D" (to),"c" (1024):"cx","di","si")
+__asm__("cld ; rep ; movsl"::"S" (from),"D" (to),"c" (1024))
 
 static unsigned char mem_map [ PAGING_PAGES ] = {0,};
 
@@ -73,12 +73,12 @@ __asm__("std ; repne ; scasb\n\t"
 	"movl $1024,%%ecx\n\t"
 	"leal 4092(%%edx),%%edi\n\t"
 	"rep ; stosl\n\t"
-	"movl %%edx,%%eax\n"
-	"1:"
+	" movl %%edx,%%eax\n"
+	"1: cld"
 	:"=a" (__res)
 	:"0" (0),"i" (LOW_MEM),"c" (PAGING_PAGES),
 	"D" (mem_map+PAGING_PAGES-1)
-	:"di","cx","dx");
+	);
 return __res;
 }
 
@@ -235,7 +235,7 @@ void un_wp_page(unsigned long * table_entry)
 	*table_entry = new_page | 7;
 	invalidate();
 	copy_page(old_page,new_page);
-}
+}	
 
 /*
  * This routine handles present pages, when users try to write
@@ -314,11 +314,12 @@ static int try_to_share(unsigned long address, struct task_struct * p)
 	if (phys_addr >= HIGH_MEMORY || phys_addr < LOW_MEM)
 		return 0;
 	to = *(unsigned long *) to_page;
-	if (!(to & 1))
-		if (to = get_free_page())
+	if (!(to & 1)) {
+		if ((to = get_free_page()))
 			*(unsigned long *) to_page = to | 7;
 		else
 			oom();
+	}
 	to &= 0xfffff000;
 	to_page = to + ((address>>10) & 0xffc);
 	if (1 & *(unsigned long *) to_page)
@@ -396,31 +397,18 @@ void do_no_page(unsigned long error_code,unsigned long address)
 	oom();
 }
 
-// 主内存初始化
-// 其实就是用一个蛮大的char型数组来管理内核区之外的内存空间
-// 不妨设总内存大小为8MB
-// 则start_mem = 2MB，end_mem   = 8MB
 void mem_init(long start_mem, long end_mem)
 {
 	int i;
 
 	HIGH_MEMORY = end_mem;
-    // PAGING_PAGES是一个很大的char型数组，用来记录每一个内存页的使用情况
-    // 内存地址开始的1MB是内核空间，无需管理
-    // 因而需要管理的内存页数目 PAGING_PAGES = 15MB/4KB
-    // 初始时将这些全部标记为已使用
 	for (i=0 ; i<PAGING_PAGES ; i++)
 		mem_map[i] = USED;
-    // 1MB ~ 2MB的内存空间设置给了buffer
 	i = MAP_NR(start_mem);
-    // 2MB ~ 8MB是可供分配的，因而需要将这6MB内存空间相应的使用位清零
 	end_mem -= start_mem;
 	end_mem >>= 12;
 	while (end_mem-->0)
 		mem_map[i++]=0;
-
-    // TODO
-    // 然而为啥主内存区域先统一设为使用后再清零呢？
 }
 
 void calc_mem(void)

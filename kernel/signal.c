@@ -10,7 +10,7 @@
 
 #include <signal.h>
 
-volatile void do_exit(int error_code);
+void do_exit(int error_code);
 
 int sys_sgetmask()
 {
